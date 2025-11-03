@@ -1,6 +1,5 @@
 use hex::{FromHex, ToHex};
 use serde::{de::Deserializer, ser::Serializer, Deserialize, Serialize};
-use uuid::Uuid;
 
 #[cfg(feature = "geth-compat")]
 use ethereum_types::H160 as Address;
@@ -13,7 +12,7 @@ pub struct EthKeystore {
     pub address: Address,
 
     pub crypto: CryptoJson,
-    pub id: Uuid,
+    pub id: String,
     pub version: u8,
 }
 
@@ -86,6 +85,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
 
     #[cfg(feature = "geth-compat")]
     #[test]
@@ -146,7 +146,9 @@ mod tests {
         assert_eq!(keystore.version, 3);
         assert_eq!(
             keystore.id,
-            Uuid::parse_str("3198bc9c-6672-5ab3-d995-4942343ae5b6").unwrap()
+            Uuid::parse_str("3198bc9c-6672-5ab3-d995-4942343ae5b6")
+                .unwrap()
+                .to_string()
         );
         assert_eq!(keystore.crypto.cipher, "aes-128-ctr");
         assert_eq!(
@@ -206,7 +208,9 @@ mod tests {
         assert_eq!(keystore.version, 3);
         assert_eq!(
             keystore.id,
-            Uuid::parse_str("3198bc9c-6672-5ab3-d995-4942343ae5b6").unwrap()
+            Uuid::parse_str("3198bc9c-6672-5ab3-d995-4942343ae5b6")
+                .unwrap()
+                .to_string()
         );
         assert_eq!(keystore.crypto.cipher, "aes-128-ctr");
         assert_eq!(

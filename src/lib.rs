@@ -232,7 +232,7 @@ where
 
     // Construct and serialize the encrypted JSON keystore.
     let keystore = EthKeystore {
-        id,
+        id: id.to_string(),
         version: 3,
         crypto: CryptoJson {
             cipher: String::from(DEFAULT_CIPHER),
