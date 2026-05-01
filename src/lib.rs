@@ -63,6 +63,7 @@ const DEFAULT_KDF_PARAMS_P: u32 = 1u32;
 /// # Ok(())
 /// # }
 /// ```
+#[deprecated = "Use `new_from_writer` for better security"]
 pub fn new<P, R, S>(
     dir: P,
     rng: &mut R,
@@ -82,6 +83,24 @@ where
     Ok((pk, name))
 }
 
+pub fn new_from_writer<W, R, S>(
+    writer: &mut W,
+    rng: &mut R,
+    password: S,
+) -> Result<Vec<u8>, KeystoreError>
+where
+    W: Write,
+    R: Rng + CryptoRng,
+    S: AsRef<[u8]>,
+{
+    // Generate a random private key.
+    let mut pk = vec![0u8; DEFAULT_KEY_SIZE];
+    rng.fill_bytes(pk.as_mut_slice());
+
+    encrypt_key_with_writer(writer, rng, &pk, password)?;
+    Ok(pk)
+}
+
 /// Decrypts an encrypted JSON keystore at the provided `path` using the provided `password`.
 /// Decryption supports the [Scrypt](https://tools.ietf.org/html/rfc7914.html) and
 /// [PBKDF2](https://ietf.org/rfc/rfc2898.txt) key derivation functions.
@@ -98,6 +117,7 @@ where
 /// # Ok(())
 /// # }
 /// ```
+#[deprecated = "Use `decrypt_key_from_reader` for better security"]
 pub fn decrypt_key<P, S>(path: P, password: S) -> Result<Vec<u8>, KeystoreError>
 where
     P: AsRef<Path>,
@@ -107,6 +127,65 @@ where
     let mut file = File::open(path)?;
     let mut contents = String::new();
     file.read_to_string(&mut contents)?;
+    let keystore: EthKeystore = serde_json::from_str(&contents)?;
+
+    // Derive the key.
+    let key = match keystore.crypto.kdfparams {
+        KdfparamsType::Pbkdf2 {
+            c,
+            dklen,
+            prf: _,
+            salt,
+        } => {
+            let mut key = vec![0u8; dklen as usize];
+            pbkdf2::<Hmac<Sha256>>(password.as_ref(), &salt, c, key.as_mut_slice())?;
+            key
+        }
+        KdfparamsType::Scrypt {
+            dklen,
+            n,
+            p,
+            r,
+            salt,
+        } => {
+            let mut key = vec![0u8; dklen as usize];
+            // TODO: use int_log https://github.com/rust-lang/rust/issues/70887
+            // TODO: when it is stable
+            let log_n = (n as f32).log2().ceil() as u8;
+            let scrypt_params = ScryptParams::new(log_n, r, p)?;
+            scrypt(password.as_ref(), &salt, &scrypt_params, key.as_mut_slice())?;
+            key
+        }
+    };
+
+    // Derive the MAC from the derived key and ciphertext.
+    let derived_mac = Keccak256::new()
+        .chain(&key[16..32])
+        .chain(&keystore.crypto.ciphertext)
+        .finalize();
+
+    if derived_mac.as_slice() != keystore.crypto.mac.as_slice() {
+        return Err(KeystoreError::MacMismatch);
+    }
+
+    // Decrypt the private key bytes using AES-128-CTR
+    let decryptor =
+        Aes128Ctr::new(&key[..16], &keystore.crypto.cipherparams.iv[..16]).expect("invalid length");
+
+    let mut pk = keystore.crypto.ciphertext;
+    decryptor.apply_keystream(&mut pk);
+
+    Ok(pk)
+}
+
+pub fn decrypt_key_from_reader<R, S>(reader: &mut R, password: S) -> Result<Vec<u8>, KeystoreError>
+where
+    R: Read,
+    S: AsRef<[u8]>,
+{
+    // Read the contents as string and deserialize it.
+    let mut contents = String::new();
+    reader.read_to_string(&mut contents)?;
     let keystore: EthKeystore = serde_json::from_str(&contents)?;
 
     // Derive the key.
@@ -182,6 +261,7 @@ where
 /// # Ok(())
 /// # }
 /// ```
+#[deprecated = "Use `encrypt_key_with_writer` for better security"]
 pub fn encrypt_key<P, R, B, S>(
     dir: P,
     rng: &mut R,
@@ -259,6 +339,79 @@ where
     file.write_all(contents.as_bytes())?;
 
     Ok(id.to_string())
+}
+
+pub fn encrypt_key_with_writer<W, R, B, S>(
+    writer: &mut W,
+    rng: &mut R,
+    pk: B,
+    password: S,
+) -> Result<(), KeystoreError>
+where
+    W: Write,
+    R: Rng + CryptoRng,
+    B: AsRef<[u8]>,
+    S: AsRef<[u8]>,
+{
+    // Generate a random salt.
+    let mut salt = vec![0u8; DEFAULT_KEY_SIZE];
+    rng.fill_bytes(salt.as_mut_slice());
+
+    // Derive the key.
+    let mut key = vec![0u8; DEFAULT_KDF_PARAMS_DKLEN as usize];
+    let scrypt_params = ScryptParams::new(
+        DEFAULT_KDF_PARAMS_LOG_N,
+        DEFAULT_KDF_PARAMS_R,
+        DEFAULT_KDF_PARAMS_P,
+    )?;
+    scrypt(password.as_ref(), &salt, &scrypt_params, key.as_mut_slice())?;
+
+    // Encrypt the private key using AES-128-CTR.
+    let mut iv = vec![0u8; DEFAULT_IV_SIZE];
+    rng.fill_bytes(iv.as_mut_slice());
+
+    let encryptor = Aes128Ctr::new(&key[..16], &iv[..16]).expect("invalid length");
+
+    let mut ciphertext = pk.as_ref().to_vec();
+    encryptor.apply_keystream(&mut ciphertext);
+
+    // Calculate the MAC.
+    let mac = Keccak256::new()
+        .chain(&key[16..32])
+        .chain(&ciphertext)
+        .finalize();
+
+    // Define a unique UUID for the keystore
+    let id = Uuid::new_v4();
+
+    // Construct and serialize the encrypted JSON keystore.
+    let keystore = EthKeystore {
+        id: id.to_string(),
+        version: 3,
+        crypto: CryptoJson {
+            cipher: String::from(DEFAULT_CIPHER),
+            cipherparams: CipherparamsJson { iv },
+            ciphertext: ciphertext.to_vec(),
+            kdf: KdfType::Scrypt,
+            kdfparams: KdfparamsType::Scrypt {
+                dklen: DEFAULT_KDF_PARAMS_DKLEN,
+                n: 2u32.pow(DEFAULT_KDF_PARAMS_LOG_N as u32),
+                p: DEFAULT_KDF_PARAMS_P,
+                r: DEFAULT_KDF_PARAMS_R,
+                salt,
+            },
+            mac: mac.to_vec(),
+        },
+        #[cfg(feature = "geth-compat")]
+        address: address_from_pk(&pk)?,
+    };
+    let contents = serde_json::to_string(&keystore)?;
+
+    // Use the writer to store the encrypted JSON keystore
+    writer.write_all(contents.as_bytes())?;
+    writer.flush()?;
+
+    Ok(())
 }
 
 struct Aes128Ctr {
