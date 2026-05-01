@@ -49,10 +49,11 @@ const DEFAULT_KDF_PARAMS_P: u32 = 1u32;
 /// ```no_run
 /// use eth_keystore::new;
 /// use std::path::Path;
+/// use rand::Rng;
 ///
 /// # async fn foobar() -> Result<(), Box<dyn std::error::Error>> {
 /// let dir = Path::new("./keys");
-/// let mut rng = rand::thread_rng();
+/// let mut rng = rand::rng();
 /// // here `None` signifies we don't specify a filename for the keystore.
 /// // the default filename is a generated Uuid for the keystore.
 /// let (private_key, name) = new(&dir, &mut rng, "password_to_keystore", None)?;
@@ -117,7 +118,7 @@ where
             salt,
         } => {
             let mut key = vec![0u8; dklen as usize];
-            pbkdf2::<Hmac<Sha256>>(password.as_ref(), &salt, c, key.as_mut_slice());
+            pbkdf2::<Hmac<Sha256>>(password.as_ref(), &salt, c, key.as_mut_slice())?;
             key
         }
         KdfparamsType::Scrypt {
@@ -165,12 +166,12 @@ where
 ///
 /// ```no_run
 /// use eth_keystore::encrypt_key;
-/// use rand::RngCore;
+/// use rand::Rng;
 /// use std::path::Path;
 ///
 /// # async fn foobar() -> Result<(), Box<dyn std::error::Error>> {
 /// let dir = Path::new("./keys");
-/// let mut rng = rand::thread_rng();
+/// let mut rng = rand::rng();
 ///
 /// // Construct a 32-byte random private key.
 /// let mut private_key = vec![0u8; 32];
