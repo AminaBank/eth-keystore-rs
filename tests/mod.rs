@@ -8,7 +8,7 @@ mod tests {
         io::{Seek, SeekFrom},
     };
 
-    use eth_keystore::{decrypt_key_from_reader, encrypt_key_with_writer, new_from_writer};
+    use eth_keystore::{decrypt_key_from_reader, encrypt_key_with_writer, new_with_writer};
 
     use super::*;
 
@@ -52,7 +52,7 @@ mod tests {
 
         let mut rng = rand::rng();
         let secret =
-            new_from_writer(&mut keystore_file, &mut rng, "thebestrandompassword").unwrap();
+            new_with_writer(&mut keystore_file, &mut rng, "thebestrandompassword").unwrap();
 
         // reset cursor
         keystore_file.seek(SeekFrom::Start(0)).unwrap();

@@ -63,7 +63,7 @@ const DEFAULT_KDF_PARAMS_P: u32 = 1u32;
 /// # Ok(())
 /// # }
 /// ```
-#[deprecated = "Use `new_from_writer` for better security"]
+#[deprecated = "Use `new_with_writer` for better security"]
 pub fn new<P, R, S>(
     dir: P,
     rng: &mut R,
@@ -83,7 +83,7 @@ where
     Ok((pk, name))
 }
 
-pub fn new_from_writer<W, R, S>(
+pub fn new_with_writer<W, R, S>(
     writer: &mut W,
     rng: &mut R,
     password: S,
