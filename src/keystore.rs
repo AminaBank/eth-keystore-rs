@@ -9,6 +9,10 @@ use ethereum_types::H160 as Address;
 /// [Web3 Secret Storage Definition](https://github.com/ethereum/wiki/wiki/Web3-Secret-Storage-Definition).
 pub struct EthKeystore {
     #[cfg(feature = "geth-compat")]
+    #[serde(
+        serialize_with = "ser_addr_noprefix",
+        deserialize_with = "de_addr_noprefix"
+    )]
     pub address: Address,
 
     pub crypto: CryptoJson,
@@ -82,10 +86,82 @@ where
         .and_then(|string| Vec::from_hex(string).map_err(|err| Error::custom(err.to_string())))
 }
 
+#[cfg(feature = "geth-compat")]
+fn ser_addr_noprefix<S>(addr: &Address, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str(&addr.as_bytes().encode_hex::<String>())
+}
+
+#[cfg(feature = "geth-compat")]
+fn de_addr_noprefix<'de, D>(deserializer: D) -> Result<Address, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    let bytes = Vec::from_hex(&s).map_err(serde::de::Error::custom)?;
+    Ok(Address::from_slice(&bytes))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use uuid::Uuid;
+
+    #[cfg(feature = "geth-compat")]
+    #[test]
+    fn serialize_deserialize_address_no_prefix() {
+        use super::*;
+        use hex::encode as hex_encode;
+        use uuid::Uuid;
+
+        // sample raw address bytes (20 bytes)
+        let addr_bytes = hex::decode("00000398232e2064f896018496b4b44b3d62751f").unwrap();
+        let address = Address::from_slice(&addr_bytes);
+
+        let keystore = EthKeystore {
+            address,
+            crypto: CryptoJson {
+                cipher: "aes-128-ctr".to_string(),
+                cipherparams: CipherparamsJson {
+                    iv: Vec::from_hex("76f07196b3c94f25b8f34d869493f640").unwrap(),
+                },
+                ciphertext: Vec::from_hex(
+                    "4f784cd629a7caf34b488e36fb96aad8a8f943a6ce31c7deab950c5e3a5b1c43",
+                )
+                .unwrap(),
+                kdf: KdfType::Scrypt,
+                kdfparams: KdfparamsType::Scrypt {
+                    dklen: 32,
+                    n: 262144,
+                    p: 1,
+                    r: 8,
+                    salt: Vec::from_hex(
+                        "1e7be4ce8351dd1710b0885438414b1748a81f1af510eda11e4d1f99c8d43975",
+                    )
+                    .unwrap(),
+                },
+                mac: Vec::from_hex(
+                    "5b5433575a2418c1c813337a88b4099baa2f534e5dabeba86979d538c1f594d8",
+                )
+                .unwrap(),
+            },
+            id: Uuid::new_v4().to_string(),
+            version: 3,
+        };
+
+        // serialize to JSON string
+        let json = serde_json::to_string(&keystore).expect("serialize");
+
+        // ensure address field is present and has no "0x" prefix and matches expected hex
+        let expected_addr_hex = hex_encode(&addr_bytes);
+        assert!(json.contains(&format!("\"address\":\"{}\"", expected_addr_hex)));
+
+        // round-trip deserialize and compare bytes
+        let parsed: EthKeystore = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(parsed.address.as_bytes().to_vec(), addr_bytes);
+    }
 
     #[cfg(feature = "geth-compat")]
     #[test]
