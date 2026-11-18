@@ -11,9 +11,9 @@ pub mod geth_compat {
     where
         S: AsRef<[u8]>,
     {
-        let secret_key = SigningKey::from_bytes(pk.as_ref().into())?;
+        let secret_key = SigningKey::from_slice(pk.as_ref())?;
         let public_key = secret_key.verifying_key();
-        let public_key = public_key.to_encoded_point(/* compress = */ false);
+        let public_key = public_key.to_sec1_point(/* compress = */ false);
         let public_key = public_key.as_bytes();
         debug_assert_eq!(public_key[0], 0x04);
         let hash = keccak256(&public_key[1..]);
